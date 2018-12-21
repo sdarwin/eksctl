@@ -1,4 +1,4 @@
-package v1alpha1
+package v1alpha3
 
 import (
 	"fmt"
@@ -9,21 +9,27 @@ import (
 type (
 	// ClusterVPC holds global subnet and all child public/private subnet
 	ClusterVPC struct {
-		Network              // global CIDR and VPC ID
-		SecurityGroup string // cluster SG
+		// +optional
+		Network `json:",inline"` // global CIDR and VPC ID
+		// +optional
+		SecurityGroup string `json:"securityGroup,omitempty"` // cluster SG
 		// subnets are either public or private for use with separate nodegroups
 		// these are keyed by AZ for convenience
-		Subnets map[SubnetTopology]map[string]Network
+		// +optional
+		Subnets map[SubnetTopology]map[string]Network `json:"subnets,omitempty"`
 		// for additional CIDR associations, e.g. to use with separate CIDR for
 		// private subnets or any ad-hoc subnets
-		ExtraCIDRs []*ipnet.IPNet
+		// +optional
+		ExtraCIDRs []*ipnet.IPNet `json:"extraCIDRs,omitempty"`
 	}
 	// SubnetTopology can be SubnetTopologyPrivate or SubnetTopologyPublic
 	SubnetTopology string
 	// Network holds ID and CIDR
 	Network struct {
-		ID   string
-		CIDR *ipnet.IPNet
+		// +optional
+		ID string `json:"id,omitempty"`
+		// +optional
+		CIDR *ipnet.IPNet `json:"cidr,omitempty"`
 	}
 )
 

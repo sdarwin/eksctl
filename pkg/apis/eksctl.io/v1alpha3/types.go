@@ -1,4 +1,4 @@
-package v1alpha1
+package v1alpha3
 
 import (
 	"fmt"
@@ -54,6 +54,9 @@ const (
 
 	// LatestVersion represents latest Kubernetes version supported by EKS
 	LatestVersion = Version1_11
+
+	// DefaultNodeType is the default instance type to use for nodes
+	DefaultNodeType = "m5.large"
 )
 
 // SupportedRegions are the regions where EKS is available
@@ -169,8 +172,10 @@ type ClusterConfigList struct {
 // call NewNodeGroup to create one
 func NewClusterConfig() *ClusterConfig {
 	cfg := &ClusterConfig{
-		Metadata: &ClusterMeta{},
-		VPC:      &ClusterVPC{},
+		Metadata: &ClusterMeta{
+			Version: LatestVersion,
+		},
+		VPC: &ClusterVPC{},
 	}
 
 	cidr := DefaultCIDR()
@@ -194,6 +199,8 @@ func (c *ClusterConfig) AppendAvailabilityZone(newAZ string) {
 func (c *ClusterConfig) NewNodeGroup() *NodeGroup {
 	ng := &NodeGroup{
 		PrivateNetworking: false,
+		DesiredCapacity:   DefaultNodeCount,
+		InstanceType:      DefaultNodeType,
 	}
 
 	c.NodeGroups = append(c.NodeGroups, ng)

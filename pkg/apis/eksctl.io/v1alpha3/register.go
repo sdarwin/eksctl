@@ -1,4 +1,4 @@
-package v1alpha1
+package v1alpha3
 
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	CurrentGroupVersion = "v1alpha1"
+	CurrentGroupVersion = "v1alpha3"
 	ClusterKind         = "Cluster"
 )
 

@@ -1,6 +1,6 @@
 # An example of a fully-populated Cluster object (e.g. as read-back after cluster was created):
 --- 
-apiVersion: eksctl.io/v1alpha1
+apiVersion: eksctl.io/v1alpha3
 kind: ClusterConfig
 
 metadata:

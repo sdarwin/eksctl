@@ -11,7 +11,7 @@ import (
 	"github.com/pkg/errors"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
-	api "github.com/weaveworks/eksctl/pkg/apis/eksctl.io/v1alpha1"
+	api "github.com/weaveworks/eksctl/pkg/apis/eksctl.io/v1alpha3"
 	"github.com/weaveworks/eksctl/pkg/cfn/builder"
 )
 

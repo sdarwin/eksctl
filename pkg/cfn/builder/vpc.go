@@ -4,7 +4,7 @@ import (
 	"strings"
 
 	gfn "github.com/awslabs/goformation/cloudformation"
-	api "github.com/weaveworks/eksctl/pkg/apis/eksctl.io/v1alpha1"
+	api "github.com/weaveworks/eksctl/pkg/apis/eksctl.io/v1alpha3"
 )
 
 func (c *ClusterResourceSet) addSubnets(refRT *gfn.Value, topology api.SubnetTopology) {

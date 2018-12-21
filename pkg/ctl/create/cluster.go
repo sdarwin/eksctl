@@ -1,7 +1,9 @@
 package create
 
 import (
+	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"os"
 	"strings"
 
@@ -9,13 +11,23 @@ import (
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
-	api "github.com/weaveworks/eksctl/pkg/apis/eksctl.io/v1alpha1"
+
+	"github.com/weaveworks/eksctl/pkg/ami"
+	_ "github.com/weaveworks/eksctl/pkg/apis/eksctl.io"
+
+	api "github.com/weaveworks/eksctl/pkg/apis/eksctl.io/v1alpha3"
 	"github.com/weaveworks/eksctl/pkg/ctl/cmdutils"
 	"github.com/weaveworks/eksctl/pkg/eks"
 	"github.com/weaveworks/eksctl/pkg/kops"
 	"github.com/weaveworks/eksctl/pkg/utils"
 	"github.com/weaveworks/eksctl/pkg/utils/kubeconfig"
 	"github.com/weaveworks/eksctl/pkg/vpc"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/kubernetes/scheme"
+)
+
+const (
+	defaultSSHPublicKey = "~/.ssh/id_rsa.pub"
 )
 
 var (
@@ -25,8 +37,11 @@ var (
 	setContext         bool
 	availabilityZones  []string
 
+	configFile = ""
+
 	kopsClusterNameForVPC string
 	subnets               map[api.SubnetTopology]*[]string
+	subnetsGiven          bool
 )
 
 func createClusterCmd(g *cmdutils.Grouping) *cobra.Command {
@@ -37,8 +52,8 @@ func createClusterCmd(g *cmdutils.Grouping) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "cluster",
 		Short: "Create a cluster",
-		Run: func(_ *cobra.Command, args []string) {
-			if err := doCreateCluster(p, cfg, ng, cmdutils.GetNameArg(args)); err != nil {
+		Run: func(cmd *cobra.Command, args []string) {
+			if err := doCreateCluster(p, cfg, ng, cmdutils.GetNameArg(args), cmd); err != nil {
 				logger.Critical("%s\n", err.Error())
 				os.Exit(1)
 			}
@@ -55,7 +70,9 @@ func createClusterCmd(g *cmdutils.Grouping) *cobra.Command {
 		fs.StringToStringVarP(&cfg.Metadata.Tags, "tags", "", map[string]string{}, `A list of KV pairs used to tag the AWS resources (e.g. "Owner=John Doe,Team=Some Team")`)
 		cmdutils.AddRegionFlag(fs, p)
 		fs.StringSliceVar(&availabilityZones, "zones", nil, "(auto-select if unspecified)")
-		fs.StringVar(&cfg.Metadata.Version, "version", api.LatestVersion, fmt.Sprintf("Kubernetes version (valid options: %s)", strings.Join(api.SupportedVersions(), ",")))
+		fs.StringVar(&cfg.Metadata.Version, "version", cfg.Metadata.Version, fmt.Sprintf("Kubernetes version (valid options: %s)", strings.Join(api.SupportedVersions(), ",")))
+
+		fs.StringVarP(&configFile, "config-file", "f", "", "load configuration from a file")
 	})
 
 	group.InFlagSet("Initial nodegroup", func(fs *pflag.FlagSet) {
@@ -71,7 +88,7 @@ func createClusterCmd(g *cmdutils.Grouping) *cobra.Command {
 	})
 
 	group.InFlagSet("VPC networking", func(fs *pflag.FlagSet) {
-		fs.IPNetVar(&cfg.VPC.CIDR.IPNet, "vpc-cidr", api.DefaultCIDR().IPNet, "global CIDR to use for VPC")
+		fs.IPNetVar(&cfg.VPC.CIDR.IPNet, "vpc-cidr", cfg.VPC.CIDR.IPNet, "global CIDR to use for VPC")
 		subnets = map[api.SubnetTopology]*[]string{
 			api.SubnetTopologyPrivate: fs.StringSlice("vpc-private-subnets", nil, "re-use private subnets of an existing VPC"),
 			api.SubnetTopologyPublic:  fs.StringSlice("vpc-public-subnets", nil, "re-use public subnets of an existing VPC"),
@@ -91,23 +108,130 @@ func createClusterCmd(g *cmdutils.Grouping) *cobra.Command {
 	return cmd
 }
 
-func doCreateCluster(p *api.ProviderConfig, cfg *api.ClusterConfig, ng *api.NodeGroup, nameArg string) error {
+func doCreateCluster(p *api.ProviderConfig, cfg *api.ClusterConfig, ng *api.NodeGroup, nameArg string, cmd *cobra.Command) error {
 	meta := cfg.Metadata
 	ctl := eks.New(p, cfg)
+
+	if configFile != "" {
+		data, err := ioutil.ReadFile(configFile)
+		if err != nil {
+			return err
+		}
+
+		if err := api.AddToScheme(scheme.Scheme); err != nil {
+			return err
+		}
+
+		obj, err := runtime.Decode(scheme.Codecs.UniversalDeserializer(), data)
+		if err != nil {
+			return err
+		}
+
+		cfg, ok := obj.(*api.ClusterConfig)
+		if !ok {
+			return fmt.Errorf("decoded object of wrong type")
+		}
+
+		// config
+		incompatibleFlags := []string{
+			"name",
+			"tags",
+			"zones",
+			"version",
+			"region",
+			"nodes",
+			"nodes-min",
+			"nodes-max",
+			"node-type",
+			"node-volume-size",
+			"max-pods-per-node",
+			"node-ami",        // TODO default ami.ResolverStatic
+			"node-ami-family", // TODO default ami.ImageFamilyAmazonLinux2
+			"ssh-access",
+			"ssh-public-key", // TODO default defaultSSHPublicKey
+			"node-private-networking",
+			"asg-access",          // TODO default false
+			"external-dns-access", // TODO default false
+			"full-ecr-access",     // TODO default false
+			"storage-class",       // TODO default true
+			"vpc-private-subnets",
+			"vpc-public-subnets",
+			"vpc-cidr",
+		}
+
+		for _, f := range incompatibleFlags {
+			if cmd.Flag(f).Changed {
+				return fmt.Errorf("cannot use --%s when --config-file/-f is set", f)
+			}
+		}
+
+		if cfg.Metadata.Name == "" {
+			return fmt.Errorf("name must be set")
+		}
+
+		if cfg.Metadata.Region == "" {
+			return fmt.Errorf("region must be set")
+		}
+
+		if ng.AMIFamily == "" {
+			ng.AMIFamily = ami.ImageFamilyAmazonLinux2
+		}
+
+		// TODO dry-run mode should provide a way to render config with all defaults set
+		// we should also make a call to resolve the AMI and write the result, similaraly
+		// the body of the SSH key can be read
+
+		if ng.AMI == "" {
+			ng.AMI = ami.ResolverStatic
+		}
+
+		if ng.AllowSSH {
+			// TODO
+		}
+
+		subnetsGiven = false
+		if cfg.VPC != nil {
+			subnetsGiven = len(cfg.VPC.Subnets[api.SubnetTopologyPrivate])+len(cfg.VPC.Subnets[api.SubnetTopologyPublic]) != 0
+		}
+
+		js, _ := json.MarshalIndent(cfg, "", "    ")
+		fmt.Println(string(js))
+
+		return nil
+	} else {
+		// validation and defaulting specific to when --config-file is unused
+		if utils.ClusterName(meta.Name, nameArg) == "" {
+			return cmdutils.ErrNameFlagAndArg(meta.Name, nameArg)
+		}
+		meta.Name = utils.ClusterName(meta.Name, nameArg)
+
+		if ng.AllowSSH && ng.SSHPublicKeyPath == "" {
+			return fmt.Errorf("--ssh-public-key must be non-empty string")
+		}
+
+		subnetsGiven = len(*subnets[api.SubnetTopologyPrivate])+len(*subnets[api.SubnetTopologyPublic]) != 0
+	}
 
 	if !ctl.IsSupportedRegion() {
 		return cmdutils.ErrUnsupportedRegion(p)
 	}
 	logger.Info("using region %s", meta.Region)
 
+	if cfg.Metadata.Version == api.LatestVersion {
+		validVersion := false
+		for _, v := range api.SupportedVersions() {
+			if cfg.Metadata.Version == v {
+				validVersion = true
+			}
+		}
+		if !validVersion {
+			return fmt.Errorf("invalid version, supported values: %s", strings.Join(api.SupportedVersions(), ","))
+		}
+	}
+
 	if err := ctl.CheckAuth(); err != nil {
 		return err
 	}
-
-	if utils.ClusterName(meta.Name, nameArg) == "" {
-		return cmdutils.ErrNameFlagAndArg(meta.Name, nameArg)
-	}
-	meta.Name = utils.ClusterName(meta.Name, nameArg)
 
 	// Use given name or generate one, no argument mode here
 	ng.Name = utils.NodeGroupName(ng.Name, "")
@@ -119,12 +243,7 @@ func doCreateCluster(p *api.ProviderConfig, cfg *api.ClusterConfig, ng *api.Node
 		kubeconfigPath = kubeconfig.AutoPath(meta.Name)
 	}
 
-	if ng.SSHPublicKeyPath == "" {
-		return fmt.Errorf("--ssh-public-key must be non-empty string")
-	}
-
 	createOrImportVPC := func() error {
-		subnetsGiven := len(*subnets[api.SubnetTopologyPrivate])+len(*subnets[api.SubnetTopologyPublic]) != 0
 
 		subnetInfo := func() string {
 			return fmt.Sprintf("VPC (%s) and subnets (private:%v public:%v)",

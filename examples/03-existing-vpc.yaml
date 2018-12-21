@@ -1,6 +1,6 @@
 # An example of Cluster object using an existing VPC:
 --- 
-apiVersion: eksctl.io/v1alpha1
+apiVersion: eksctl.io/v1alpha3
 kind: ClusterConfig
 
 metadata:
