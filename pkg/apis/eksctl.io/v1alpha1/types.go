@@ -1,4 +1,4 @@
-package api
+package v1alpha1
 
 import (
 	"fmt"
@@ -8,6 +8,8 @@ import (
 	"github.com/aws/aws-sdk-go/service/ec2/ec2iface"
 	"github.com/aws/aws-sdk-go/service/eks/eksiface"
 	"github.com/aws/aws-sdk-go/service/sts/stsiface"
+
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 const (
@@ -85,10 +87,12 @@ const DefaultNodeCount = 2
 
 // ClusterMeta is what identifies a cluster
 type ClusterMeta struct {
-	Name    string
-	Region  string
-	Version string
-	Tags    map[string]string
+	Name   string `json:"name"`
+	Region string `json:"region"`
+	// +optional
+	Version string `json:"version,omitempty"`
+	// +optional
+	Tags map[string]string `json:"tags,omitempty"`
 }
 
 // String returns canonical representation of ClusterMeta
@@ -122,23 +126,42 @@ type ProviderConfig struct {
 	WaitTimeout time.Duration
 }
 
+// +genclient
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+
 // ClusterConfig is a simple config, to be replaced with Cluster API
 type ClusterConfig struct {
-	Metadata *ClusterMeta
+	metav1.TypeMeta `json:",inline"`
 
-	VPC *ClusterVPC
+	Metadata *ClusterMeta `json:"metadata"`
 
-	NodeGroups []*NodeGroup
+	// +optional
+	VPC *ClusterVPC `json:"vpc,omitempty"`
 
+	// +optional
+	NodeGroups []*NodeGroup `json:"nodeGroups,omitempty"`
+
+	// +optional
+	AvailabilityZones []string `json:"availabilityZones,omitempty"`
+
+	// TODO: refactor and move IAM addons to nodegroup
+	Addons ClusterAddons
+
+	// TODO: move under status
 	Endpoint                 string
 	CertificateAuthorityData []byte
 	ARN                      string
+	ClusterStackName         string
+}
 
-	ClusterStackName string
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 
-	AvailabilityZones []string
+// ClusterConfigList is a list of ClusterConfigs
+type ClusterConfigList struct {
+	metav1.TypeMeta `json:",inline"`
+	metav1.ListMeta `json:"metadata"`
 
-	Addons ClusterAddons
+	Items []ClusterConfig `json:"items"`
 }
 
 // NewClusterConfig create new config for a cluster;
@@ -181,31 +204,47 @@ func (c *ClusterConfig) NewNodeGroup() *NodeGroup {
 // NodeGroup holds all configuration attributes that are
 // specific to a nodegroup
 type NodeGroup struct {
-	Name string
+	Name string `json:"name"`
+	// +optional
+	AMI string `json:"ami,omitempty"`
+	// +optional
+	AMIFamily string `json:"amiFamily,omitempty"`
+	// +optional
+	InstanceType string `json:"instanceType,omitempty"`
+	// +optional
+	AvailabilityZones []string `json:"availabilityZones,omitempty"`
+	// +optional
+	Tags map[string]string `json:"tags,omitempty"`
+	// +optional
+	PrivateNetworking bool `json:"privateNetworking"`
 
-	AMI               string
-	AMIFamily         string
-	InstanceType      string
-	AvailabilityZones []string
-	Tags              map[string]string
-	PrivateNetworking bool
+	DesiredCapacity int `json:"desiredCapacity"`
+	// +optional
+	MinSize int `json:"minSize,omitempty"`
+	// +optional
+	MaxSize int `json:"maxSize,omitempty"`
 
-	DesiredCapacity int
-	MinSize         int
-	MaxSize         int
+	// +optional
 
-	VolumeSize int
+	VolumeSize int `json:"volumeSize"`
+	// +optional
+	MaxPodsPerNode int `json:"maxPodsPerNode,omitempty"`
 
-	Labels         NodeLabels
-	MaxPodsPerNode int
+	Labels NodeLabels
 
-	PolicyARNs      []string
-	InstanceRoleARN string
+	// +optional
+	PolicyARNs []string `json:"policyARNs,omitempty"`
+	// +optional
+	InstanceRoleARN string `json:"instanceRoleARN,omitempty"` // TODO: read-only
 
-	AllowSSH         bool
-	SSHPublicKeyPath string
-	SSHPublicKey     []byte
-	SSHPublicKeyName string
+	// +optional
+	AllowSSH bool `json:"allowSSH,omitempty"`
+	// +optional
+	SSHPublicKeyPath string `json:"sshPublicKeyPath,omitempty"`
+	// +optional
+	SSHPublicKey []byte `json:"SSHPublicKey,omitempty"` // TODO: right now it's kind of read-only, but one may wish to use key body in a config file so we will need recognise that
+	// +optional
+	SSHPublicKeyName string `json:"sshPublicKeyName,omitempty"`
 }
 
 // SubnetTopology check which topology is used for the subnet of
