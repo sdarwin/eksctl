@@ -14,11 +14,12 @@ import (
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
+	api "github.com/weaveworks/eksctl/pkg/apis/eksctl.io/v1alpha3"
 	. "github.com/weaveworks/eksctl/pkg/cfn/builder"
 	"github.com/weaveworks/eksctl/pkg/cloudconfig"
-	"github.com/weaveworks/eksctl/pkg/apis/eksctl.io/v1alpha3"
 	"github.com/weaveworks/eksctl/pkg/nodebootstrap"
 	"github.com/weaveworks/eksctl/pkg/testutils/mockprovider"
+	"github.com/weaveworks/eksctl/pkg/utils/ipnet"
 	"github.com/weaveworks/eksctl/pkg/vpc"
 )
 
@@ -96,9 +97,11 @@ func testVPC() *api.ClusterVPC {
 	return &api.ClusterVPC{
 		Network: api.Network{
 			ID: vpcID,
-			CIDR: &net.IPNet{
-				IP:   []byte{192, 168, 0, 0},
-				Mask: []byte{255, 255, 0, 0},
+			CIDR: &ipnet.IPNet{
+				IPNet: net.IPNet{
+					IP:   []byte{192, 168, 0, 0},
+					Mask: []byte{255, 255, 0, 0},
+				},
 			},
 		},
 		SecurityGroup: "sg-0b44c48bcba5b7362",
@@ -106,46 +109,58 @@ func testVPC() *api.ClusterVPC {
 			"Public": map[string]api.Network{
 				"us-west-2b": {
 					ID: "subnet-0f98135715dfcf55f",
-					CIDR: &net.IPNet{
-						IP:   []byte{192, 168, 0, 0},
-						Mask: []byte{255, 255, 224, 0},
+					CIDR: &ipnet.IPNet{
+						IPNet: net.IPNet{
+							IP:   []byte{192, 168, 0, 0},
+							Mask: []byte{255, 255, 224, 0},
+						},
 					},
 				},
 				"us-west-2a": {
 					ID: "subnet-0ade11bad78dced9e",
-					CIDR: &net.IPNet{
-						IP:   []byte{192, 168, 32, 0},
-						Mask: []byte{255, 255, 224, 0},
+					CIDR: &ipnet.IPNet{
+						IPNet: net.IPNet{
+							IP:   []byte{192, 168, 32, 0},
+							Mask: []byte{255, 255, 224, 0},
+						},
 					},
 				},
 				"us-west-2c": {
 					ID: "subnet-0e2e63ff1712bf6ef",
-					CIDR: &net.IPNet{
-						IP:   []byte{192, 168, 64, 0},
-						Mask: []byte{255, 255, 224, 0},
+					CIDR: &ipnet.IPNet{
+						IPNet: net.IPNet{
+							IP:   []byte{192, 168, 64, 0},
+							Mask: []byte{255, 255, 224, 0},
+						},
 					},
 				},
 			},
 			"Private": map[string]api.Network{
 				"us-west-2b": {
 					ID: "subnet-0f98135715dfcf55a",
-					CIDR: &net.IPNet{
-						IP:   []byte{192, 168, 96, 0},
-						Mask: []byte{255, 255, 224, 0},
+					CIDR: &ipnet.IPNet{
+						IPNet: net.IPNet{
+							IP:   []byte{192, 168, 96, 0},
+							Mask: []byte{255, 255, 224, 0},
+						},
 					},
 				},
 				"us-west-2a": {
 					ID: "subnet-0ade11bad78dced9f",
-					CIDR: &net.IPNet{
-						IP:   []byte{192, 168, 128, 0},
-						Mask: []byte{255, 255, 224, 0},
+					CIDR: &ipnet.IPNet{
+						IPNet: net.IPNet{
+							IP:   []byte{192, 168, 128, 0},
+							Mask: []byte{255, 255, 224, 0},
+						},
 					},
 				},
 				"us-west-2c": {
 					ID: "subnet-0e2e63ff1712bf6ea",
-					CIDR: &net.IPNet{
-						IP:   []byte{192, 168, 160, 0},
-						Mask: []byte{255, 255, 224, 0},
+					CIDR: &ipnet.IPNet{
+						IPNet: net.IPNet{
+							IP:   []byte{192, 168, 160, 0},
+							Mask: []byte{255, 255, 224, 0},
+						},
 					},
 				},
 			},
@@ -243,8 +258,9 @@ var _ = Describe("CloudFormation template builder API", func() {
 
 		expected := &api.ClusterConfig{
 			Metadata: &api.ClusterMeta{
-				Region: "us-west-2",
-				Name:   clusterName,
+				Region:  "us-west-2",
+				Name:    clusterName,
+				Version: "1.11",
 			},
 			Endpoint:                 endpoint,
 			CertificateAuthorityData: caCertData,
@@ -258,6 +274,7 @@ var _ = Describe("CloudFormation template builder API", func() {
 					InstanceType:      "t2.medium",
 					Name:              "ng-abcd1234",
 					PrivateNetworking: false,
+					DesiredCapacity:   2,
 				},
 			},
 		}
@@ -302,7 +319,12 @@ var _ = Describe("CloudFormation template builder API", func() {
 		})
 
 		It("should be equal", func() {
-			Expect(*cfg).To(Equal(*expected))
+			cfgData, err := json.Marshal(cfg)
+			Expect(err).ShouldNot(HaveOccurred())
+			expectedData, err := json.Marshal(expected)
+			Expect(err).ShouldNot(HaveOccurred())
+
+			Expect(cfgData).To(MatchJSON(expectedData))
 		})
 	})
 
@@ -755,7 +777,7 @@ var _ = Describe("CloudFormation template builder API", func() {
 
 		cfg.Endpoint = endpoint
 		cfg.CertificateAuthorityData = caCertData
-		_, cfg.VPC.CIDR, _ = net.ParseCIDR("10.1.0.0/16")
+		cfg.VPC.CIDR, _ = ipnet.ParseCIDR("10.1.0.0/16")
 		cfg.NodeGroups[0].AMIFamily = "Ubuntu1804"
 		cfg.NodeGroups[0].InstanceType = "m5.large"
 
