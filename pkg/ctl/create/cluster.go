@@ -1,7 +1,6 @@
 package create
 
 import (
-	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"os"
@@ -14,6 +13,7 @@ import (
 
 	"github.com/weaveworks/eksctl/pkg/ami"
 	_ "github.com/weaveworks/eksctl/pkg/apis/eksctl.io"
+	"github.com/weaveworks/eksctl/pkg/printers"
 
 	api "github.com/weaveworks/eksctl/pkg/apis/eksctl.io/v1alpha3"
 	"github.com/weaveworks/eksctl/pkg/ctl/cmdutils"
@@ -22,6 +22,7 @@ import (
 	"github.com/weaveworks/eksctl/pkg/utils"
 	"github.com/weaveworks/eksctl/pkg/utils/kubeconfig"
 	"github.com/weaveworks/eksctl/pkg/vpc"
+
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/scheme"
 )
@@ -112,13 +113,14 @@ func doCreateCluster(p *api.ProviderConfig, cfg *api.ClusterConfig, ng *api.Node
 	meta := cfg.Metadata
 	ctl := eks.New(p, cfg)
 
+	printer := printers.NewJSONPrinter()
+	if err := api.AddToScheme(scheme.Scheme); err != nil {
+		return err
+	}
+
 	if configFile != "" {
 		data, err := ioutil.ReadFile(configFile)
 		if err != nil {
-			return err
-		}
-
-		if err := api.AddToScheme(scheme.Scheme); err != nil {
 			return err
 		}
 
@@ -194,10 +196,8 @@ func doCreateCluster(p *api.ProviderConfig, cfg *api.ClusterConfig, ng *api.Node
 			subnetsGiven = len(cfg.VPC.Subnets[api.SubnetTopologyPrivate])+len(cfg.VPC.Subnets[api.SubnetTopologyPublic]) != 0
 		}
 
-		js, _ := json.MarshalIndent(cfg, "", "    ")
-		fmt.Println(string(js))
+		return printer.LogObj(logger.Info, "loaded cluster config\n", cfg) // TODO: move this to debug level
 
-		return nil
 	} else {
 		// validation and defaulting specific to when --config-file is unused
 		if utils.ClusterName(meta.Name, nameArg) == "" {
@@ -339,6 +339,10 @@ func doCreateCluster(p *api.ProviderConfig, cfg *api.ClusterConfig, ng *api.Node
 	logger.Debug("cfg = %#v", cfg)
 
 	logger.Info("creating %s", meta.LogString())
+
+	if err := printer.LogObj(logger.Info, "cfg = \\\n", cfg); err != nil { // TODO: move this to debug level
+		return err
+	}
 
 	{ // core action
 		stackManager := ctl.NewStackManager(cfg)

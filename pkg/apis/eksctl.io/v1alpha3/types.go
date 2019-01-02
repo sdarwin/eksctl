@@ -172,6 +172,10 @@ type ClusterConfigList struct {
 // call NewNodeGroup to create one
 func NewClusterConfig() *ClusterConfig {
 	cfg := &ClusterConfig{
+		TypeMeta: metav1.TypeMeta{
+			Kind:       ClusterConfigKind,
+			APIVersion: SchemeGroupVersion.String(),
+		},
 		Metadata: &ClusterMeta{
 			Version: LatestVersion,
 		},

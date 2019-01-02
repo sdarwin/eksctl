@@ -10,7 +10,7 @@ import (
 
 const (
 	CurrentGroupVersion = "v1alpha3"
-	ClusterKind         = "Cluster"
+	ClusterConfigKind   = "ClusterConfig"
 )
 
 // SchemeGroupVersion is group version used to register these objects
